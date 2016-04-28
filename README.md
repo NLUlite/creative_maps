@@ -6,12 +6,16 @@ containers that map a string to another one.
 
 One can train the network as in the following
 
+```bash
 cmap ["hi"] = "ciao"
 cmap ["good morning"] = "buongiorno"
+```
 
 and then retrieve the results with
 
+```
 pring cmap ["hi"]
+```
 
 The network learns the corresponence between Hi and Ciao. Moreover, if
 the trainset is large enough, it starts recognizing patterns in the

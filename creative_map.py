@@ -70,7 +70,7 @@ class CreativeMap:
 
 class StringCreativeMap (CreativeMap):
     def __init__(self, max_seq_length):
-        self.END_CHAR = '.'
+        self.END_CHAR = '\0'
         self.FILLING_CHAR = ' '
         self.max_seq_length = max_seq_length
         vocab_size = 256

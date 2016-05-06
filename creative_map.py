@@ -2,9 +2,10 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops import seq2seq
 from tensorflow.python.ops import rnn_cell
+from sys import stderr
 
 class CreativeMap:
-    def __init__(self, seq_length, vocab_size):
+    def __init__(self, seq_length, vocab_size, stack_dimension):
         self.sess = tf.InteractiveSession()
 
         self.seq_length = seq_length
@@ -22,7 +23,7 @@ class CreativeMap:
         self.dec_inp = ([tf.zeros_like(self.enc_inp[0], dtype=np.int32, name="GO")]
                         + self.enc_inp[:-1])
         single_cell = rnn_cell.GRUCell(self.memory_dim)
-        self.cell = rnn_cell.MultiRNNCell([single_cell]*2)
+        self.cell = rnn_cell.MultiRNNCell([single_cell]*stack_dimension)
 #        self.dec_outputs, self.dec_memory = seq2seq.embedding_tied_rnn_seq2seq(
 #            self.enc_inp, self.dec_inp, self.cell, self.vocab_size, self.embedding_size)
         self.dec_outputs, self.dec_memory = seq2seq.embedding_rnn_seq2seq(
@@ -69,12 +70,15 @@ class CreativeMap:
 
 
 class StringCreativeMap (CreativeMap):
-    def __init__(self, max_seq_length):
+    def __init__(self, max_seq_length, stack_dimension=2, batch_size=1):
         self.END_CHAR = '\0'
         self.FILLING_CHAR = ' '
         self.max_seq_length = max_seq_length
         vocab_size = 256
-        CreativeMap.__init__(self, max_seq_length, vocab_size)
+        CreativeMap.__init__(self, max_seq_length, vocab_size, stack_dimension)
+        self.training_set_input = []
+        self.training_set_output = []
+        self.batch_size = batch_size
         
     def __convert_string_to_ints (self, X):
         if X[-1] != self.END_CHAR:
@@ -91,6 +95,7 @@ class StringCreativeMap (CreativeMap):
     def __valid_inputs_or_throw (self, X):
         if not isinstance(X,str):
             raise ValueError ("The arguments to setitem must be strings.")
+        X = X.split(self.END_CHAR)[0]
         if len(X) >= self.max_seq_length:
             raise ValueError ("The arguments must be shorter than max_seq_length.")
 
@@ -99,11 +104,27 @@ class StringCreativeMap (CreativeMap):
         self.__valid_inputs_or_throw (Y)
         X = self.__convert_string_to_ints (X)
         Y = self.__convert_string_to_ints (Y)
-        CreativeMap.__setitem__(self, [X for _ in range(1)], [Y for _ in range(1)])
+        self.training_set_input.append(X)
+        self.training_set_output.append(Y)
 
     def __getitem__(self,X):
         self.__valid_inputs_or_throw (X)
         X = self.__convert_string_to_ints (X)
-        output_in_integers = CreativeMap.__getitem__(self, [X for _ in range(1)])
+        output_in_integers = CreativeMap.__getitem__(self, [X])
         return self.__convert_ints_to_string (output_in_integers[0])
         
+    def train(self):
+        training_set_size = len(self.training_set_input)
+        total_number_of_batches = training_set_size/self.batch_size
+        if total_number_of_batches < 50:
+            stderr.write('Warning: Number of batches is too small! ' 
+                         'Please increase the training set '
+                         'or decrease the batch size.')
+        for j in range(total_number_of_batches):
+            CreativeMap.__setitem__(
+                self, 
+                [self.training_set_input[i+j] for i in range(self.batch_size)], 
+                [self.training_set_output[i+j] for i in range(self.batch_size)]
+            )
+        self.training_set_input = []
+        self.training_set_output = []

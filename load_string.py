@@ -1,8 +1,8 @@
 from creative_map import StringCreativeMap        
 
-max_seq_length = 20
+max_seq_length = 10
 
-cmap = StringCreativeMap (max_seq_length)
+cmap = StringCreativeMap (max_seq_length, 2)
 cmap.load ("strings.nn")
 
 inp = "hello"

@@ -34,15 +34,13 @@ The code in this script reads as
 ```python
 from creative_map import StringCreativeMap
 
-max_seq_length = 20
-
-def train (cmap):
-    for t in range(200):
-        cmap["hello"] = "world"
-        cmap["ciao"]  = "mondo"
+max_seq_length = 10
         
 cmap = StringCreativeMap (max_seq_length)
-train (cmap)
+for t in range(100):
+    cmap["hello"] = "world"
+    cmap["ciao"]  = "mondo"
+cmap.train ()
 cmap.save ("strings.nn")
 ```
 
@@ -58,9 +56,9 @@ which brings the result
 hello world
 ciao mondo
 ---
-hi mordd
+hi moodd
 hallo world
-bonjour mond
+bonjour moodd
 ```
 
 The first two lines are the reply based on the trained data. The last

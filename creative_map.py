@@ -3,15 +3,17 @@ import tensorflow as tf
 from tensorflow.python.ops import seq2seq
 from tensorflow.python.ops import rnn_cell
 from sys import stderr
-
+import re
+import sys
+        
 class CreativeMap:
     def __init__(self, seq_length, vocab_size, stack_dimension):
         self.sess = tf.InteractiveSession()
 
         self.seq_length = seq_length
         self.vocab_size = vocab_size
-        self.embedding_dim = vocab_size
-        self.memory_dim = 100
+        self.embedding_dim = 1
+        self.memory_dim = 500
         self.enc_inp = [tf.placeholder(tf.int32, shape=(None,),
                                        name="inp%i" % t)
                         for t in range(seq_length)]
@@ -37,7 +39,6 @@ class CreativeMap:
         self.sess.run(tf.initialize_all_variables())
         tf.scalar_summary("loss", self.loss)
         self.summary_op = tf.merge_all_summaries()
-
         
     def __setitem__(self,X,Y):
         X = np.fliplr(X)
@@ -47,6 +48,8 @@ class CreativeMap:
         feed_dict.update({self.labels[t]: Y[t] for t in range(self.seq_length)})
 
         _, loss_t, summary = self.sess.run([self.train_op, self.loss, self.summary_op], feed_dict)
+#        print loss_t
+        sys.stdout.flush()
         return loss_t, summary
 
     
@@ -128,3 +131,96 @@ class StringCreativeMap (CreativeMap):
             )
         self.training_set_input = []
         self.training_set_output = []
+        
+class WordsCreativeMap (CreativeMap):
+    def __init__(self, max_seq_length, input_vect, output_vect, stack_dimension=2, batch_size=1):
+        self.END_CHAR = 0
+        self.FILLING_CHAR = ' '
+        self.max_seq_length = max_seq_length
+        vocab_size = len(input_vect)+10
+        CreativeMap.__init__(self, max_seq_length, vocab_size, stack_dimension)
+        self.training_set_input = []
+        self.training_set_output = []
+        self.batch_size = batch_size
+        self.input_vect = input_vect
+        self.output_vect = output_vect
+
+    def __get_int_from_list(self, vect, word):
+        index = 0
+        try:
+            index = vect.index(word)
+        except:
+            index = 1
+        return index
+        
+    def __convert_input_string_to_ints (self, X):
+        words = re.findall(r'\w+', X)
+        words = [word.lower() for word in words]
+        X = [self.__get_int_from_list(self.input_vect,words[i]) for i in range (len(words))]
+        if len(X) >= self.max_seq_length:
+            X = X[:self.max_seq_length-1]
+        for i in range(self.max_seq_length - len(X)):
+            X = X + [0]
+        return X
+
+    def __convert_output_string_to_ints (self, X):
+        words = re.findall(r'\w+', X)
+        words = [word.lower() for word in words]
+        X = [self.__get_int_from_list(self.output_vect,words[i]) for i in range (len(words))]
+        if len(X) >= self.max_seq_length:
+            X = X[:self.max_seq_length-1]
+        for i in range(self.max_seq_length - len(X)):
+            X = X + [0]
+        return X
+
+    
+    def __convert_output_ints_to_string (self, X):
+        X = ' '.join([self.output_vect[X[i]] for i in range (len(X))])
+#        X, _, _ = X.partition(self.END_CHAR)
+        return X
+
+    def __valid_inputs_or_throw (self, X):
+#        if not isinstance(X,str):
+#            raise ValueError ("The arguments to setitem must be strings.")
+#        X = X.split(self.END_CHAR)[0]
+#        if len(X) >= self.max_seq_length:
+#            raise ValueError ("The arguments must be shorter than max_seq_length.")
+        return True
+
+    def __setitem__(self,X,Y):
+        self.__valid_inputs_or_throw (X)
+        self.__valid_inputs_or_throw (Y)
+        X = self.__convert_input_string_to_ints (X)
+        Y = self.__convert_output_string_to_ints (Y)
+        self.training_set_input.append(X)
+        self.training_set_output.append(Y)
+
+    def __getitem__(self,X):
+        self.__valid_inputs_or_throw (X)
+        X = self.__convert_input_string_to_ints (X)
+        output_in_integers = CreativeMap.__getitem__(self, [X])
+        return self.__convert_output_ints_to_string (output_in_integers[0])
+        
+    def train(self):
+        training_set_size = len(self.training_set_input)
+        total_number_of_batches = training_set_size/self.batch_size
+        if total_number_of_batches < 50:
+            stderr.write('Warning: Number of batches is too small! ' 
+                         'Please increase the training set '
+                         'or decrease the batch size.')
+        for r in range(3000):
+            training_vect_loss = []
+            for j in range(total_number_of_batches):
+                loss, _ = CreativeMap.__setitem__(
+                    self, 
+                    [self.training_set_input[i+j] for i in range(self.batch_size)], 
+                    [self.training_set_output[i+j] for i in range(self.batch_size)]
+                )
+                training_vect_loss.append(loss)
+            print max(training_vect_loss)
+            if max(training_vect_loss) < 0.05:
+                break
+        self.training_set_input = []
+        self.training_set_output = []
+
+

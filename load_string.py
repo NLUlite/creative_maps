@@ -1,4 +1,4 @@
-from creative_map import StringCreativeMap        
+from creative_maps.string_creative_map import StringCreativeMap
 
 max_seq_length = 10
 

@@ -5,10 +5,10 @@ max_seq_length = 30
         
 cmap = EmbeddedCreativeMap (max_seq_length,
                             gensim.models.Word2Vec.load_word2vec_format('data/deps.words.txt',binary=False),
-                            2, 2)
+                            1, 1)
 en_lines = codecs.open('data/ordered_lines.txt', encoding='utf8', errors='ignore').readlines()
 
-for t in range(6):
+for t in range(5):
     from_line = str(en_lines[t])
     to_line = str(en_lines[t+1])
     tokenizer = nltk.tokenize.TweetTokenizer()

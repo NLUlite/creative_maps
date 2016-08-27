@@ -6,6 +6,9 @@ cmap = StringCreativeMap (max_seq_length)
 cmap["hello"] = "world"
 cmap["ciao"]  = "mondo"
 
-cmap.train ()
-cmap.save ("strings.nn")
+try:
+    cmap.train ()
+except:
+    pass
 
+cmap.save ("strings.nn")

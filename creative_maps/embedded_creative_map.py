@@ -1,28 +1,29 @@
 from base_creative_map import BaseCreativeMap
+import gensim
 import nltk
 
 
+import numpy as np
+
 class EmbeddedCreativeMap (BaseCreativeMap):
-    def __init__(self, max_seq_length, model, stack_dimension=2, batch_size=1):
-        self.END_CHAR = 1
-        self.FILLING_CHAR = 0
+    def __init__(self, max_seq_length, model, stack_dimension=1, batch_size=1):
         self.model = model
         self.max_seq_length = max_seq_length
-        vocab_size = len(self.model.vocab)
-        BaseCreativeMap.__init__(self, max_seq_length, vocab_size, stack_dimension, self.model.syn0)
+        self.vocab_size = self.model.syn0.shape[1]
+        BaseCreativeMap.__init__(self, max_seq_length, self.vocab_size, stack_dimension, batch_size)
         self.training_set_input = []
         self.training_set_output = []
         self.batch_size = batch_size
 
 
     def __get_int_from_list(self, word):
-        index = 0
+        index = self.model['.']
         try:
-            index = self.model.vocab[word].index
+            index = self.model[word]
         except:
-            index = 1
+            index = self.model['.']
         return index
-        
+
     def __convert_input_string_to_ints (self, X):
         tokenizer = nltk.tokenize.TweetTokenizer()
         words = tokenizer.tokenize(X)
@@ -30,9 +31,8 @@ class EmbeddedCreativeMap (BaseCreativeMap):
         X = [self.__get_int_from_list(words[i]) for i in range (len(words))]
         if len(X) >= self.max_seq_length:
             X = X[:self.max_seq_length-1]
-        X.append(self.END_CHAR)
         for i in range(self.max_seq_length - len(X)):
-            X = X + [self.FILLING_CHAR]
+            X.append(self.model['.'])
         return X
 
     def __convert_output_string_to_ints (self, X):
@@ -42,14 +42,13 @@ class EmbeddedCreativeMap (BaseCreativeMap):
         X = [self.__get_int_from_list(words[i]) for i in range (len(words))]
         if len(X) >= self.max_seq_length:
             X = X[:self.max_seq_length-1]
-        X.append(self.END_CHAR)
         for i in range(self.max_seq_length - len(X)):
-            X = X + [self.FILLING_CHAR]
+            X.append(self.model['.'])
         return X
 
     
     def __convert_output_ints_to_string (self, X):
-        X = ' '.join([self.model.index2word[X[i]] for i in range (len(X))])
+        X = ' '.join([self.model.most_similar([X[i]],[],topn=1)[0][0] for i in range(len(X))])
         return X
 
     def __setitem__(self,X,Y):
@@ -61,6 +60,7 @@ class EmbeddedCreativeMap (BaseCreativeMap):
     def __getitem__(self,X):
         X = self.__convert_input_string_to_ints (X)
         output_in_integers = BaseCreativeMap.__getitem__(self, [X])
+        output_in_integers = np.transpose(output_in_integers,[1,0,2])
         return self.__convert_output_ints_to_string (output_in_integers[0])
         
     def train (self):

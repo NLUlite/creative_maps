@@ -1,80 +1,104 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops import seq2seq
-from tensorflow.python.ops import rnn_cell
+from tensorflow.python.ops import rnn, rnn_cell, nn_ops
+from tensorflow.python.ops import math_ops, array_ops
 from sys import stderr
 import re
 import nltk
 import sys
-import gensim
+import copy
 
+def rnn_decoder(decoder_inputs, initial_state, cell, Ws, bs, vocab_size, batch_size, memory_dim):
+    with tf.variable_scope("rnn_decoder"):
+        state = initial_state
+        outputs = []
+        for i, inp in enumerate(decoder_inputs):
+            if i > 0:
+                tf.get_variable_scope().reuse_variables()
+            output, state = cell(inp, state)
+            output = array_ops.reshape(output,[1,-1])
+            output = tf.slice(output,[0,0],[1,memory_dim])
+            y = tf.nn.softmax(tf.matmul(output, Ws) + bs)
+            outputs.append(y)
+    return outputs, state
+
+
+def loss (examples, targets):
+    log_perp_list = []
+    for example, target in zip(examples, targets):
+        target = array_ops.reshape(target, [-1])
+        example = array_ops.reshape(example, [-1])
+        const = tf.constant(1e-12)
+        crossent = tf.reduce_mean(-tf.reduce_sum((example+const)*tf.log(target+const)))
+        log_perp_list.append(crossent)
+    log_perps = math_ops.add_n(log_perp_list)
+    total_size = len(targets)
+    total_size += 1e-12
+    log_perps /= total_size
+    return log_perps
+
+ 
 class BaseCreativeMap(object):
     def __init__(self,
                  seq_length,
                  vocab_size,
                  stack_dimension,
-                 embedding_matrix = None):
+                 batch_size):
         config = tf.ConfigProto(allow_soft_placement=True)
         self.sess = tf.Session(config=config)
 
         self.seq_length = seq_length
         self.vocab_size = vocab_size
-        self.embedding_dim = 300
-        self.memory_dim = 100
-        self.enc_inp = [tf.placeholder(tf.int32, shape=(None,),
-                                       name="inp%i" % t)
+        self.memory_dim = vocab_size
+
+        self.enc_inp = [tf.placeholder(tf.float32, shape=(vocab_size,batch_size), name="enc_inp%i" % t)
                         for t in range(seq_length)]
-        self.labels = [tf.placeholder(tf.int32, shape=(None,),
-                                      name="labels%i" % t)
-                       for t in range(seq_length)]
+
+        self.dec_inp = self.enc_inp[:-1] + [tf.zeros_like(self.enc_inp[0], dtype=np.float32, name="GO")]
+
+
+        single_enc_cell = rnn_cell.LSTMCell(self.memory_dim, state_is_tuple=False)
+        self.enc_cell = rnn_cell.MultiRNNCell([single_enc_cell]*stack_dimension, state_is_tuple=True)
+        _, encoder_state = rnn.rnn(self.enc_cell, self.enc_inp, dtype=tf.float32)
+
+        single_dec_cell = rnn_cell.LSTMCell(self.memory_dim, state_is_tuple=False)
+        self.dec_cell = rnn_cell.MultiRNNCell([single_dec_cell]*stack_dimension, state_is_tuple=True)
+
+
+        self.Ws = tf.Variable(tf.random_uniform([self.memory_dim, self.vocab_size],0,0.1))
+        self.bs = tf.Variable(tf.random_uniform([self.vocab_size],-0.1,0.1))
+
+        
+        self.dec_outputs, self.dec_state = rnn_decoder(self.dec_inp, encoder_state, self.dec_cell, self.Ws, self.bs, vocab_size, batch_size, self.memory_dim)
+
+        self.labels = [tf.placeholder(tf.float32, [vocab_size, batch_size], name = 'LABEL%i' % t)
+                        for t in range(seq_length)]
         self.weights = [tf.ones_like(labels_t, dtype=tf.float32)
                         for labels_t in self.labels]
-        self.dec_inp = ([tf.zeros_like(self.enc_inp[0], dtype=np.int32, name="GO")]
-                        + self.enc_inp[:-1])
-        single_cell = rnn_cell.LSTMCell(self.memory_dim, state_is_tuple=False)
-        self.cell = rnn_cell.MultiRNNCell([single_cell]*stack_dimension, state_is_tuple=True)
-        self.dec_outputs, self.dec_memory = seq2seq.embedding_rnn_seq2seq(
-            self.enc_inp, self.dec_inp, self.cell, self.vocab_size, self.vocab_size, self.embedding_dim)
-        self.loss = seq2seq.sequence_loss(self.dec_outputs, self.labels, self.weights, self.vocab_size)
-        self.learning_rate = 0.05
-        self.momentum = 0.9
-        self.optimizer = tf.train.MomentumOptimizer(self.learning_rate,
-                                                    self.momentum)
-        self.train_op = self.optimizer.minimize(self.loss)
-
-        if embedding_matrix is not None:
-            with tf.device('/gpu:0') and tf.variable_scope("embedding_rnn_seq2seq/RNN/EmbeddingWrapper", reuse=True):
-                embedding_encoder = tf.get_variable("embedding",[vocab_size,self.embedding_dim])
-
-            with tf.device('/gpu:0') and tf.variable_scope("embedding_rnn_seq2seq/embedding_rnn_decoder", reuse=True):
-                embedding_decoder = tf.get_variable("embedding",[vocab_size,self.embedding_dim])
-
+        self.loss = loss(self.labels, self.dec_outputs)
+        
+        self.train_op = tf.train.AdamOptimizer(1e-3).minimize(self.loss)
         self.sess.run(tf.initialize_all_variables())
-        tf.scalar_summary("loss", self.loss)
-        self.summary_op = tf.merge_all_summaries()
 
-        if embedding_matrix is not None:
-            self.sess.run(embedding_encoder.assign(embedding_matrix))
-            self.sess.run(embedding_decoder.assign(embedding_matrix))
 
     def __setitem(self,X,Y):
-        X = np.fliplr(X)
-        X = np.array(X).T
-        Y = np.array(Y).T
+        X= np.transpose(X,(1,2,0))
+        X= X[::-1,:,:]
+        Y= np.transpose(Y,(1,2,0))
         feed_dict = {self.enc_inp[t]: X[t] for t in range(self.seq_length)}
         feed_dict.update({self.labels[t]: Y[t] for t in range(self.seq_length)})
-
-        _, loss_t, summary = self.sess.run([self.train_op, self.loss, self.summary_op], feed_dict)
+        _, loss_t = self.sess.run([self.train_op, self.loss], feed_dict)
         sys.stdout.flush()
-        return loss_t, summary
+        return loss_t
 
     
     def __getitem__(self,X):
-        X = np.fliplr(X)
-        X = np.array(X).T
+        X= np.transpose(X,(1,2,0))
+        X= X[::-1,:,:]
         feed_dict = {self.enc_inp[t]: X[t] for t in range(self.seq_length)}
         dec_outputs_batch = self.sess.run(self.dec_outputs, feed_dict)
-        return np.array ([logits_t.argmax(axis=1) for logits_t in dec_outputs_batch]).T
+        return dec_outputs_batch
 
     
     def save (self, filename):
@@ -100,7 +124,7 @@ class BaseCreativeMap(object):
         for r in range(30000):
             training_vect_loss = []
             for j in range(total_number_of_batches):
-                loss, _ = self.__setitem(
+                loss = self.__setitem(
                     [training_set_input[i+j] for i in range(batch_size)], 
                     [training_set_output[i+j] for i in range(batch_size)]
                 )
@@ -111,7 +135,9 @@ class BaseCreativeMap(object):
             trace_min.write(str(min_loss)+'\n')
             trace_min.flush()
             trace_max.flush()
-            if max_loss < 0.05 and max_loss - min_loss < 0.01:
+            if max_loss < 0.01 and max_loss - min_loss < 0.005:
+                break
+            if max_loss < -130 and max_loss - min_loss < 1:
                 break
         training_set_input = []
         training_set_output = []
